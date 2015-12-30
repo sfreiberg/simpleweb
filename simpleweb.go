@@ -1,9 +1,6 @@
 package main
 
 import (
-	"code.google.com/p/gorilla/mux"
-	"github.com/flosch/pongo"
-
 	"flag"
 	"fmt"
 	"io"
@@ -12,9 +9,11 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
+
+	"github.com/gorilla/mux"
+	"gopkg.in/flosch/pongo2.v3"
 )
 
 var (
@@ -25,7 +24,6 @@ var (
 
 func init() {
 	flag.Parse()
-	runtime.GOMAXPROCS(runtime.NumCPU())
 }
 
 func main() {
@@ -53,9 +51,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 		}
 	} else {
-		ctx := pongo.Context{"host": host, "uri": r.URL.RequestURI(), "time": time.Now()}
-		tmpl, err := pongo.FromFile(templateFile, nil)
-		err = tmpl.ExecuteRW(w, &ctx)
+		ctx := pongo2.Context{"host": host, "uri": r.URL.RequestURI(), "time": time.Now()}
+		tmpl, err := pongo2.FromFile(templateFile)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		err = tmpl.ExecuteWriter(ctx, w)
 		if err != nil {
 			io.WriteString(w, err.Error())
 		}
