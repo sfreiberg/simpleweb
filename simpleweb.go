@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flosch/pongo2/v6"
 	"github.com/gorilla/mux"
-	"gopkg.in/flosch/pongo2.v3"
 )
 
 var (
@@ -22,11 +22,9 @@ var (
 	addr             = flag.String("addr", ":80", "Address and port to listen on")
 )
 
-func init() {
-	flag.Parse()
-}
-
 func main() {
+	flag.Parse()
+
 	router := mux.NewRouter()
 	router.Methods("GET").HandlerFunc(handler)
 	err := http.ListenAndServe(*addr, router)
