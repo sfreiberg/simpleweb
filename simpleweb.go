@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/flosch/pongo2/v6"
 	"github.com/gorilla/mux"
-	"gopkg.in/flosch/pongo2.v3"
 )
 
 var (
@@ -22,11 +22,9 @@ var (
 	addr             = flag.String("addr", ":80", "Address and port to listen on")
 )
 
-func init() {
-	flag.Parse()
-}
-
 func main() {
+	flag.Parse()
+
 	router := mux.NewRouter()
 	router.Methods("GET").HandlerFunc(handler)
 	err := http.ListenAndServe(*addr, router)
@@ -43,7 +41,17 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		host = r.Host
 	}
-	templateFile := template(host, r.URL.RequestURI())
+	// The Host header is client controlled and becomes a directory name, so
+	// reject anything that could escape the sites directory (e.g. "..").
+	if !validHost(host) {
+		http.Error(w, "invalid host", http.StatusBadRequest)
+		return
+	}
+	// Use the cleaned path, not RequestURI: RequestURI includes the query
+	// string (so "/about?x=1" never matched about.html) and is not cleaned.
+	uri := path.Clean("/" + r.URL.Path)
+
+	templateFile := template(host, uri)
 	if templateFile == "" {
 		if *serveStaticFiles {
 			http.FileServer(http.Dir(filepath.Join(*sitesPath, host))).ServeHTTP(w, r)
@@ -51,23 +59,32 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 		}
 	} else {
-		ctx := pongo2.Context{"host": host, "uri": r.URL.RequestURI(), "time": time.Now()}
+		ctx := pongo2.Context{"host": host, "uri": uri, "time": time.Now()}
 		tmpl, err := pongo2.FromFile(templateFile)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Printf("parsing %s: %v", templateFile, err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
-		err = tmpl.ExecuteWriter(ctx, w)
-		if err != nil {
-			io.WriteString(w, err.Error())
+		// ExecuteWriter renders into a buffer first, so nothing has been
+		// written yet if it fails.
+		if err := tmpl.ExecuteWriter(ctx, w); err != nil {
+			log.Printf("rendering %s: %v", templateFile, err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
 		}
 	}
 }
 
-func template(host, uri string) string {
-	if uri == "/" {
-		return path.Join(*sitesPath, host, "index.html")
+// validHost reports whether host is safe to use as a directory name below
+// the sites path.
+func validHost(host string) bool {
+	if host == "" || host == "." || host == ".." || strings.HasPrefix(host, ".") {
+		return false
 	}
+	return !strings.ContainsAny(host, "/\\\x00")
+}
+
+func template(host, uri string) string {
 	file := path.Join(*sitesPath, host, uri)
 	if templateExists(file) {
 		return file
